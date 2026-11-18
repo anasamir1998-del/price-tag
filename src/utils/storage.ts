@@ -212,20 +212,49 @@ export function saveProductsToStorage(products: ProductItem[]): void {
   }
 }
 
+const OLD_PRICE_COL_KEYWORDS = ['سابق', 'قبل', 'قديم', 'old', 'before', 'was', 'prev', 'original'];
+
+function hasOldPriceColKeyword(col: string): boolean {
+  const normalized = String(col || '').trim().toLowerCase();
+  return OLD_PRICE_COL_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
+export function sanitizeMappings(mappings: FieldMapping[]): FieldMapping[] {
+  if (!Array.isArray(mappings)) return [];
+  const filtered = mappings.filter((m) => {
+    if (!m || !m.templateField || !m.fileColumn) return false;
+    if (m.templateField === 'old_price' && !hasOldPriceColKeyword(m.fileColumn)) {
+      return false;
+    }
+    if (m.templateField === 'price' && hasOldPriceColKeyword(m.fileColumn)) {
+      return false;
+    }
+    return true;
+  });
+
+  const priceCol = filtered.find((m) => m.templateField === 'price')?.fileColumn;
+  if (!priceCol) return filtered;
+
+  return filtered.filter(
+    (m) => !(m.templateField === 'old_price' && m.fileColumn === priceCol)
+  );
+}
+
 export function loadMappingsFromStorage(fallback: FieldMapping[]): FieldMapping[] {
   const saved = safeGetItem('pricetag_mappings');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return sanitizeMappings(parsed);
     } catch (e) {}
   }
-  return fallback;
+  return sanitizeMappings(fallback);
 }
 
 export function saveMappingsToStorage(mappings: FieldMapping[]): void {
-  safeSetItem('pricetag_mappings', JSON.stringify(mappings));
-  idbSet('pricetag_mappings', mappings);
+  const sanitized = sanitizeMappings(mappings);
+  safeSetItem('pricetag_mappings', JSON.stringify(sanitized));
+  idbSet('pricetag_mappings', sanitized);
 }
 
 export function loadCustomTemplatesFromStorage(): TagTemplate[] {

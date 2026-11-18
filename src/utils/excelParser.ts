@@ -48,6 +48,13 @@ export async function parseExcelFile(file: File): Promise<{
   });
 }
 
+const OLD_PRICE_COLUMN_KEYWORDS = ['سابق', 'قبل', 'قديم', 'old', 'before', 'was', 'prev', 'original'];
+
+function isOldPriceColumnName(col: string): boolean {
+  const normalized = col.trim().toLowerCase();
+  return OLD_PRICE_COLUMN_KEYWORDS.some((kw) => normalized.includes(kw));
+}
+
 /**
  * Automatically suggest field mappings based on column name heuristics
  */
@@ -55,7 +62,8 @@ export function autoSuggestMappings(
   templateFields: string[],
   fileColumns: string[]
 ): FieldMapping[] {
-  const mappings: FieldMapping[] = [];
+  const mappingsByField = new Map<string, string>();
+  const usedColumns = new Set<string>();
 
   const aliases: Record<string, string[]> = {
     product_name: ['اسم المنتج', 'اسم الصنف', 'الصنف', 'المنتج', 'product', 'name', 'product_name', 'item_name', 'title'],
@@ -71,25 +79,46 @@ export function autoSuggestMappings(
     description: ['الوصف', 'تفاصيل', 'المواصفات', 'description', 'desc', 'details'],
   };
 
+  const isColumnAllowedForField = (tField: string, col: string): boolean => {
+    if (tField === 'price') return !isOldPriceColumnName(col);
+    if (tField === 'old_price') return isOldPriceColumnName(col);
+    return true;
+  };
+
+  // Pass 1: Exact Match
   templateFields.forEach((tField) => {
     const possibleMatches = aliases[tField] || [tField];
-    let matchedColumn = '';
 
     for (const col of fileColumns) {
+      if (usedColumns.has(col) || !isColumnAllowedForField(tField, col)) continue;
       const normalizedCol = col.trim().toLowerCase();
-      if (
-        possibleMatches.some(
-          (alias) =>
-            normalizedCol === alias.toLowerCase() ||
-            normalizedCol.includes(alias.toLowerCase()) ||
-            alias.toLowerCase().includes(normalizedCol)
-        )
-      ) {
-        matchedColumn = col;
+      if (possibleMatches.some((alias) => normalizedCol === alias.toLowerCase())) {
+        mappingsByField.set(tField, col);
+        usedColumns.add(col);
         break;
       }
     }
+  });
 
+  // Pass 2: Contained Alias Match (column contains alias)
+  templateFields.forEach((tField) => {
+    if (mappingsByField.has(tField)) return;
+    const possibleMatches = aliases[tField] || [tField];
+
+    for (const col of fileColumns) {
+      if (usedColumns.has(col) || !isColumnAllowedForField(tField, col)) continue;
+      const normalizedCol = col.trim().toLowerCase();
+      if (possibleMatches.some((alias) => normalizedCol.includes(alias.toLowerCase()))) {
+        mappingsByField.set(tField, col);
+        usedColumns.add(col);
+        break;
+      }
+    }
+  });
+
+  const mappings: FieldMapping[] = [];
+  templateFields.forEach((tField) => {
+    const matchedColumn = mappingsByField.get(tField);
     if (matchedColumn) {
       mappings.push({
         templateField: tField,

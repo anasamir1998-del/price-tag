@@ -39,19 +39,53 @@ export const Canvas: React.FC<CanvasProps> = ({
   mappings,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  
+  const userZoomOverrideRef = useRef<boolean>(false);
+  const lastTouchTimeRef = useRef<number>(0);
+
   const getOptimalZoom = useCallback((width: number, height: number) => {
-    const maxDim = Math.max(width, height);
-    if (maxDim >= 250) return 0.7; // A4 size
-    if (maxDim >= 140) return 1.2; // A5 / A6 size
-    if (maxDim >= 90) return 1.8;  // Medium tags
-    return 2.5;                    // Small shelf tags
+    const containerWidth =
+      containerRef.current?.clientWidth ||
+      (typeof window !== 'undefined' ? window.innerWidth : 1024);
+    const containerHeight =
+      containerRef.current?.clientHeight ||
+      (typeof window !== 'undefined' ? window.innerHeight - 120 : 700);
+
+    const isMobile = containerWidth < 640;
+    const paddingX = isMobile ? 24 : 80;
+    const paddingY = isMobile ? 96 : 120;
+
+    const availWidth = Math.max(120, containerWidth - paddingX);
+    const availHeight = Math.max(120, containerHeight - paddingY);
+
+    const wPx = mmToPx(width, SCREEN_DPI);
+    const hPx = mmToPx(height, SCREEN_DPI);
+
+    const scaleX = availWidth / wPx;
+    const scaleY = availHeight / hPx;
+    const fitZoom = Math.min(scaleX, scaleY) * 0.92;
+
+    return Number(Math.max(0.18, Math.min(2.5, fitZoom)).toFixed(2));
   }, []);
 
   const [zoom, setZoom] = useState<number>(() => getOptimalZoom(template.widthMm, template.heightMm));
 
   useEffect(() => {
+    userZoomOverrideRef.current = false;
     setZoom(getOptimalZoom(template.widthMm, template.heightMm));
+  }, [template.widthMm, template.heightMm, getOptimalZoom]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (!userZoomOverrideRef.current) {
+        setZoom(getOptimalZoom(template.widthMm, template.heightMm));
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [template.widthMm, template.heightMm, getOptimalZoom]);
 
   const [barcodeImages, setBarcodeImages] = useState<Record<string, string>>({});
@@ -171,9 +205,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     );
   };
 
-  // Start Dragging Element
-  const handleMouseDownElement = (e: React.MouseEvent, el: TagElement) => {
-    e.stopPropagation();
+  const startElementDrag = (clientX: number, clientY: number, el: TagElement) => {
     onSelectElement(el.id);
 
     // If template is locked or element is locked/hidden, prevent accidental move
@@ -181,18 +213,16 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     setIsDragging(true);
     setResizeHandle(null);
-    setDragStartPos({ x: e.clientX, y: e.clientY });
+    setDragStartPos({ x: clientX, y: clientY });
     setElementStartPos({ left: el.left, top: el.top, width: el.width, height: el.height });
   };
 
-  // Start Resizing Handle
-  const handleMouseDownResize = (e: React.MouseEvent, handle: string) => {
-    e.stopPropagation();
+  const startResizeDrag = (clientX: number, clientY: number, handle: string) => {
     if (template.isLocked || !selectedElement || selectedElement.locked) return;
 
     setIsDragging(true);
     setResizeHandle(handle);
-    setDragStartPos({ x: e.clientX, y: e.clientY });
+    setDragStartPos({ x: clientX, y: clientY });
     setElementStartPos({
       left: selectedElement.left,
       top: selectedElement.top,
@@ -201,13 +231,43 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
-  // Global Mouse Move for Drag / Resize
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
+  // Start Dragging Element (Mouse)
+  const handleMouseDownElement = (e: React.MouseEvent, el: TagElement) => {
+    e.stopPropagation();
+    if (Date.now() - lastTouchTimeRef.current < 500) return;
+    startElementDrag(e.clientX, e.clientY, el);
+  };
+
+  // Start Dragging Element (Touch)
+  const handleTouchStartElement = (e: React.TouchEvent, el: TagElement) => {
+    e.stopPropagation();
+    if (e.touches.length !== 1) return;
+    lastTouchTimeRef.current = Date.now();
+    startElementDrag(e.touches[0].clientX, e.touches[0].clientY, el);
+  };
+
+  // Start Resizing Handle (Mouse)
+  const handleMouseDownResize = (e: React.MouseEvent, handle: string) => {
+    e.stopPropagation();
+    if (Date.now() - lastTouchTimeRef.current < 500) return;
+    startResizeDrag(e.clientX, e.clientY, handle);
+  };
+
+  // Start Resizing Handle (Touch)
+  const handleTouchStartResize = (e: React.TouchEvent, handle: string) => {
+    e.stopPropagation();
+    if (e.touches.length !== 1) return;
+    lastTouchTimeRef.current = Date.now();
+    startResizeDrag(e.touches[0].clientX, e.touches[0].clientY, handle);
+  };
+
+  // Shared Drag / Resize Pointer Move Logic
+  const processPointerMove = useCallback(
+    (clientX: number, clientY: number) => {
       if (!isDragging || !selectedElement || template.isLocked) return;
 
-      const deltaXPx = (e.clientX - dragStartPos.x) / zoom;
-      const deltaYPx = (e.clientY - dragStartPos.y) / zoom;
+      const deltaXPx = (clientX - dragStartPos.x) / zoom;
+      const deltaYPx = (clientY - dragStartPos.y) / zoom;
 
       const deltaXMm = pxToMm(deltaXPx, SCREEN_DPI);
       const deltaYMm = pxToMm(deltaYPx, SCREEN_DPI);
@@ -290,7 +350,22 @@ export const Canvas: React.FC<CanvasProps> = ({
     [isDragging, selectedElement, dragStartPos, zoom, resizeHandle, elementStartPos, template]
   );
 
-  const handleMouseUp = () => {
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      processPointerMove(e.clientX, e.clientY);
+    },
+    [processPointerMove]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (!isDragging || e.touches.length !== 1) return;
+      processPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+    },
+    [isDragging, processPointerMove]
+  );
+
+  const handlePointerUp = () => {
     if (
       isDragging &&
       selectedElement &&
@@ -320,16 +395,27 @@ export const Canvas: React.FC<CanvasProps> = ({
     <main
       ref={containerRef}
       onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseDown={() => onSelectElement(null)}
-      className="flex-1 bg-slate-100 dark:bg-slate-950 bg-canvas-grid-light dark:bg-canvas-grid relative overflow-auto flex flex-col items-center justify-center p-8 select-none transition-colors"
+      onMouseUp={handlePointerUp}
+      onMouseDown={() => {
+        if (Date.now() - lastTouchTimeRef.current < 500) return;
+        onSelectElement(null);
+      }}
+      onTouchStart={(e) => {
+        if (e.touches.length === 1) {
+          onSelectElement(null);
+        }
+      }}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handlePointerUp}
+      onTouchCancel={handlePointerUp}
+      className="flex-1 min-w-0 min-h-0 bg-slate-100 dark:bg-slate-950 bg-canvas-grid-light dark:bg-canvas-grid relative overflow-auto flex flex-col p-3 pt-16 sm:p-8 sm:pt-20 select-none transition-colors"
     >
       {/* Top Floating Controls Bar: Zoom & Sample Data Switcher & Lock Toggle */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-4 py-2 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl text-slate-800 dark:text-slate-100">
+      <div className="absolute top-2 sm:top-4 left-1/2 -translate-x-1/2 z-30 w-[calc(100%-1rem)] sm:w-auto max-w-full flex flex-wrap items-center justify-center gap-1.5 sm:gap-3 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md px-2.5 py-1.5 sm:px-4 sm:py-2 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl text-slate-800 dark:text-slate-100">
         {/* Lock/Unlock Template Structure Button */}
         <button
           onClick={toggleTemplateLock}
-          className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold border transition-all ${
+          className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold border transition-all ${
             template.isLocked
               ? 'bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700/80 text-amber-700 dark:text-amber-300 shadow-sm'
               : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
@@ -349,11 +435,11 @@ export const Canvas: React.FC<CanvasProps> = ({
           )}
         </button>
 
-        <div className="h-5 w-px bg-slate-200 dark:border-slate-800" />
+        <div className="hidden sm:block h-5 w-px bg-slate-200 dark:border-slate-800" />
 
         {/* Sample Item Navigation */}
-        <div className="flex items-center gap-1.5 border-l border-slate-200 dark:border-slate-800 pl-3">
-          <span className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1">
+        <div className="flex items-center gap-1 sm:gap-1.5 sm:border-l sm:border-slate-200 sm:dark:border-slate-800 sm:pl-3">
+          <span className="hidden sm:inline-flex text-xs text-slate-500 dark:text-slate-400 font-medium items-center gap-1">
             <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
             عينة المعاينة:
           </span>
@@ -364,7 +450,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           >
             <ChevronRight className="w-4 h-4" />
           </button>
-          <span className="text-xs font-bold text-brand-600 dark:text-brand-300 min-w-[50px] text-center font-mono">
+          <span className="text-[11px] sm:text-xs font-bold text-brand-600 dark:text-brand-300 min-w-[40px] sm:min-w-[50px] text-center font-mono">
             {currentProductIndex + 1} / {sampleProducts.length}
           </span>
           <button
@@ -375,34 +461,43 @@ export const Canvas: React.FC<CanvasProps> = ({
             <ChevronLeft className="w-4 h-4" />
           </button>
           {currentItem && (
-            <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-md font-mono font-bold mr-1">
+            <span className="text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-md font-mono font-bold">
               {currentItem.print_quantity || currentItem.quantity || 1} ملصق
             </span>
           )}
         </div>
 
         {/* Zoom Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <button
-            onClick={() => setZoom(Math.max(1, zoom - 0.25))}
-            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={() => {
+              userZoomOverrideRef.current = true;
+              setZoom(Math.max(0.15, Number((zoom - 0.15).toFixed(2))));
+            }}
+            className="p-1 sm:p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title="تصغير"
           >
             <ZoomOut className="w-4 h-4" />
           </button>
-          <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 w-12 text-center">
+          <span className="text-[11px] sm:text-xs font-mono font-bold text-slate-700 dark:text-slate-300 w-10 sm:w-12 text-center">
             {Math.round(zoom * 100)}%
           </span>
           <button
-            onClick={() => setZoom(Math.min(5, zoom + 0.25))}
-            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            onClick={() => {
+              userZoomOverrideRef.current = true;
+              setZoom(Math.min(4, Number((zoom + 0.15).toFixed(2))));
+            }}
+            className="p-1 sm:p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title="تكبير"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
           <button
-            onClick={() => setZoom(getOptimalZoom(template.widthMm, template.heightMm))}
-            className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-medium"
+            onClick={() => {
+              userZoomOverrideRef.current = false;
+              setZoom(getOptimalZoom(template.widthMm, template.heightMm));
+            }}
+            className="p-1 sm:p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-xs font-medium"
             title="إعادة ضبط الحجم"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -410,15 +505,24 @@ export const Canvas: React.FC<CanvasProps> = ({
         </div>
       </div>
 
-      {/* Canvas Workspace Board */}
+      {/* Canvas Workspace Board (Scaled Layout Wrapper) */}
       <div
         style={{
-          transform: `scale(${zoom})`,
-          transformOrigin: 'center center',
-          transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+          width: `${Math.round(canvasWidthPx * zoom)}px`,
+          height: `${Math.round(canvasHeightPx * zoom)}px`,
         }}
-        className="relative my-auto"
+        className="relative m-auto flex-shrink-0"
       >
+        <div
+          style={{
+            width: `${canvasWidthPx}px`,
+            height: `${canvasHeightPx}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: 'top left',
+            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+          }}
+          className="absolute top-0 left-0"
+        >
         {/* Alignment Center Guides */}
         {activeGuides.x !== undefined && (
           <div
@@ -487,6 +591,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <div
                   key={el.id}
                   onMouseDown={(e) => handleMouseDownElement(e, el)}
+                  onTouchStart={(e) => handleTouchStartElement(e, el)}
                   style={{
                     position: 'absolute',
                     left: `${leftPx}px`,
@@ -499,6 +604,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                     cursor: el.locked ? 'not-allowed' : 'move',
                   }}
                   className={`group select-none ${
+                    !el.locked && !template.isLocked ? 'touch-none' : ''
+                  } ${
                     isSelected ? 'ring-2 ring-brand-500 ring-offset-1 ring-offset-transparent' : 'hover:ring-1 hover:ring-brand-400/50'
                   }`}
                 >
@@ -636,33 +743,40 @@ export const Canvas: React.FC<CanvasProps> = ({
                     <>
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'nw')}
-                        className="absolute -top-1 -left-1 w-2.5 h-2.5 bg-brand-500 border border-white rounded-full cursor-nwse-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'nw')}
+                        className="absolute -top-1.5 -left-1.5 sm:-top-1 sm:-left-1 w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 bg-brand-500 border border-white rounded-full cursor-nwse-resize z-30 touch-none"
                       />
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'ne')}
-                        className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-brand-500 border border-white rounded-full cursor-nesw-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'ne')}
+                        className="absolute -top-1.5 -right-1.5 sm:-top-1 sm:-right-1 w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 bg-brand-500 border border-white rounded-full cursor-nesw-resize z-30 touch-none"
                       />
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'sw')}
-                        className="absolute -bottom-1 -left-1 w-2.5 h-2.5 bg-brand-500 border border-white rounded-full cursor-nesw-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'sw')}
+                        className="absolute -bottom-1.5 -left-1.5 sm:-bottom-1 sm:-left-1 w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 bg-brand-500 border border-white rounded-full cursor-nesw-resize z-30 touch-none"
                       />
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'se')}
-                        className="absolute -bottom-1 -right-1 w-2.5 h-2.5 bg-brand-500 border border-white rounded-full cursor-nwse-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'se')}
+                        className="absolute -bottom-1.5 -right-1.5 sm:-bottom-1 sm:-right-1 w-3.5 h-3.5 sm:w-2.5 sm:h-2.5 bg-brand-500 border border-white rounded-full cursor-nwse-resize z-30 touch-none"
                       />
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'e')}
-                        className="absolute top-1/2 -right-1 -translate-y-1/2 w-2 h-3 bg-brand-500 border border-white rounded cursor-ew-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'e')}
+                        className="absolute top-1/2 -right-1.5 sm:-right-1 -translate-y-1/2 w-3 h-4 sm:w-2 sm:h-3 bg-brand-500 border border-white rounded cursor-ew-resize z-30 touch-none"
                       />
                       <div
                         onMouseDown={(e) => handleMouseDownResize(e, 'w')}
-                        className="absolute top-1/2 -left-1 -translate-y-1/2 w-2 h-3 bg-brand-500 border border-white rounded cursor-ew-resize z-30"
+                        onTouchStart={(e) => handleTouchStartResize(e, 'w')}
+                        className="absolute top-1/2 -left-1.5 sm:-left-1 -translate-y-1/2 w-3 h-4 sm:w-2 sm:h-3 bg-brand-500 border border-white rounded cursor-ew-resize z-30 touch-none"
                       />
                     </>
                   )}
                 </div>
               );
             })}
+        </div>
         </div>
       </div>
     </main>

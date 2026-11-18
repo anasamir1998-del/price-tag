@@ -1,8 +1,19 @@
 import { TagTemplate, TagElement, ProductItem, FieldMapping } from '../types';
-import { mmToPx, PRINT_DPI } from './dimensions';
+import { mmToPx, PRINT_DPI, SCREEN_DPI } from './dimensions';
 import { generateBarcodeDataUrl } from './barcodeGenerator';
+import { downloadFile } from './fileDownloader';
 
 const OPTIONAL_DYNAMIC_FIELDS = new Set(['old_price', 'discount_percentage']);
+const OLD_PRICE_COLUMN_KEYWORDS = ['سابق', 'قبل', 'قديم', 'old', 'before', 'was', 'prev', 'original'];
+
+function isValidMappedColumnForField(field: string, fileColumn: string): boolean {
+  const normalized = String(fileColumn || '').trim().toLowerCase();
+  if (!normalized) return false;
+  const isOldCol = OLD_PRICE_COLUMN_KEYWORDS.some((kw) => normalized.includes(kw));
+  if (field === 'old_price') return isOldCol;
+  if (field === 'price') return !isOldCol;
+  return true;
+}
 
 function isZeroOrEmptyOptionalValue(raw: string): boolean {
   const trimmed = raw.trim();
@@ -69,7 +80,7 @@ export function buildUpdatedProductPrices(
       }
     }
     const mappedCol = mappings?.find((m) => m.templateField === field)?.fileColumn;
-    if (mappedCol && mappedCol in updated) {
+    if (mappedCol && isValidMappedColumnForField(field, mappedCol) && mappedCol in updated) {
       updated[mappedCol] = value;
     }
   };
@@ -79,9 +90,11 @@ export function buildUpdatedProductPrices(
   }
   if (updates.price !== undefined) {
     syncAliasKeys('price', updates.price, ['السعر', 'سعر البيع']);
+    updated['السعر'] = updates.price;
   }
   if (updates.oldPrice !== undefined) {
     syncAliasKeys('old_price', updates.oldPrice, ['السعر السابق', 'السعر قبل الخصم']);
+    updated['السعر السابق'] = updates.oldPrice;
   }
   if (updates.printQuantity !== undefined) {
     updated.print_quantity = updates.printQuantity;
@@ -118,39 +131,78 @@ export function resolveElementText(
   const fieldName = element.fieldName || '';
   let val = '';
 
-  // Look up mapped column name first
-  if (mappings && mappings.length > 0) {
-    const mapping = mappings.find((m) => m.templateField === fieldName);
-    if (mapping && item[mapping.fileColumn] !== undefined && item[mapping.fileColumn] !== null) {
-      val = String(item[mapping.fileColumn]);
+  if (fieldName === 'old_price') {
+    if (item.old_price !== undefined && item.old_price !== null) {
+      val = String(item.old_price);
+    } else {
+      const mapping = mappings?.find((m) => m.templateField === 'old_price');
+      if (
+        mapping &&
+        isValidMappedColumnForField('old_price', mapping.fileColumn) &&
+        item[mapping.fileColumn] !== undefined &&
+        item[mapping.fileColumn] !== null
+      ) {
+        val = String(item[mapping.fileColumn]);
+      } else if (item['السعر السابق'] !== undefined && item['السعر السابق'] !== null) {
+        val = String(item['السعر السابق']);
+      } else if (item['السعر قبل الخصم'] !== undefined && item['السعر قبل الخصم'] !== null) {
+        val = String(item['السعر قبل الخصم']);
+      }
     }
-  }
+  } else if (fieldName === 'price') {
+    if (item.price !== undefined && item.price !== null && String(item.price) !== '') {
+      val = String(item.price);
+    } else {
+      const mapping = mappings?.find((m) => m.templateField === 'price');
+      if (
+        mapping &&
+        isValidMappedColumnForField('price', mapping.fileColumn) &&
+        item[mapping.fileColumn] !== undefined &&
+        item[mapping.fileColumn] !== null
+      ) {
+        val = String(item[mapping.fileColumn]);
+      } else if (item['السعر'] !== undefined && item['السعر'] !== null) {
+        val = String(item['السعر']);
+      } else if (item['سعر البيع'] !== undefined && item['سعر البيع'] !== null) {
+        val = String(item['سعر البيع']);
+      }
+    }
+  } else {
+    // Look up mapped column name first
+    if (mappings && mappings.length > 0) {
+      const mapping = mappings.find((m) => m.templateField === fieldName);
+      if (
+        mapping &&
+        isValidMappedColumnForField(fieldName, mapping.fileColumn) &&
+        item[mapping.fileColumn] !== undefined &&
+        item[mapping.fileColumn] !== null
+      ) {
+        val = String(item[mapping.fileColumn]);
+      }
+    }
 
-  // Fallback to direct key matching
-  if (!val && item[fieldName] !== undefined && item[fieldName] !== null) {
-    val = String(item[fieldName]);
-  }
+    // Fallback to direct key matching
+    if (!val && item[fieldName] !== undefined && item[fieldName] !== null) {
+      val = String(item[fieldName]);
+    }
 
-  // Fallback to common Arabic keys if not found
-  if (!val) {
-    if (fieldName === 'product_name' && (item['اسم المنتج'] || item['اسم الصنف'] || item['المنتج'] || item['name'])) {
-      val = String(item['اسم المنتج'] || item['اسم الصنف'] || item['المنتج'] || item['name']);
-    } else if (fieldName === 'price' && (item['السعر'] || item['سعر البيع'] || item['price'])) {
-      val = String(item['السعر'] || item['سعر البيع'] || item['price']);
-    } else if (fieldName === 'old_price' && (item['السعر السابق'] || item['السعر قبل الخصم'] || item['old_price'])) {
-      val = String(item['السعر السابق'] || item['السعر قبل الخصم'] || item['old_price']);
-    } else if (fieldName === 'barcode' && (item['الباركود'] || item['كود'] || item['barcode'])) {
-      val = String(item['الباركود'] || item['كود'] || item['barcode']);
-    } else if (fieldName === 'unit' && (item['الوحدة'] || item['unit'])) {
-      val = String(item['الوحدة'] || item['unit']);
-    } else if (fieldName === 'category' && (item['القسم'] || item['التصنيف'] || item['category'] || item['category_id'])) {
-      val = String(item['القسم'] || item['التصنيف'] || item['category'] || item['category_id']);
-    } else if (fieldName === 'origin' && (item['بلد المنشأ'] || item['المنشأ'] || item['origin'])) {
-      val = String(item['بلد المنشأ'] || item['المنشأ'] || item['origin']);
-    } else if (fieldName === 'discount_percentage' && (item['نسبة الخصم'] || item['discount'])) {
-      val = String(item['نسبة الخصم'] || item['discount']);
-    } else if (fieldName === 'description' && (item['المواصفات'] || item['الوصف'] || item['description'])) {
-      val = String(item['المواصفات'] || item['الوصف'] || item['description']);
+    // Fallback to common Arabic keys if not found
+    if (!val) {
+      if (fieldName === 'product_name' && (item['اسم المنتج'] || item['اسم الصنف'] || item['المنتج'] || item['name'])) {
+        val = String(item['اسم المنتج'] || item['اسم الصنف'] || item['المنتج'] || item['name']);
+      } else if (fieldName === 'barcode' && (item['الباركود'] || item['كود'] || item['barcode'])) {
+        val = String(item['الباركود'] || item['كود'] || item['barcode']);
+      } else if (fieldName === 'unit' && (item['الوحدة'] || item['unit'])) {
+        val = String(item['الوحدة'] || item['unit']);
+      } else if (fieldName === 'category' && (item['القسم'] || item['التصنيف'] || item['category'] || item['category_id'])) {
+        val = String(item['القسم'] || item['التصنيف'] || item['category'] || item['category_id']);
+      } else if (fieldName === 'origin' && (item['بلد المنشأ'] || item['المنشأ'] || item['origin'])) {
+        val = String(item['بلد المنشأ'] || item['المنشأ'] || item['origin']);
+      } else if (fieldName === 'discount_percentage' && (item['نسبة الخصم'] || item['discount'])) {
+        val = String(item['نسبة الخصم'] || item['discount']);
+      } else if (fieldName === 'description' && (item['المواصفات'] || item['الوصف'] || item['description'])) {
+        val = String(item['المواصفات'] || item['الوصف'] || item['description']);
+      }
     }
   }
 
@@ -582,4 +634,290 @@ export async function renderTagToCanvas(
   }
 
   return canvas;
+}
+
+function escapeXml(str: string): string {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function getSvgImageAspectRatio(fit?: 'contain' | 'cover' | 'fill'): string {
+  if (fit === 'fill') return 'none';
+  if (fit === 'cover') return 'xMidYMid slice';
+  return 'xMidYMid meet';
+}
+
+/**
+ * Render a complete price tag template as a scalable SVG string
+ */
+export async function renderTagToSvg(
+  template: TagTemplate,
+  item?: ProductItem,
+  mappings?: FieldMapping[]
+): Promise<string> {
+  const widthPx = Math.round(mmToPx(template.widthMm, SCREEN_DPI));
+  const heightPx = Math.round(mmToPx(template.heightMm, SCREEN_DPI));
+  const cardRadiusPx = template.borderRadius ? mmToPx(template.borderRadius, SCREEN_DPI) : 0;
+
+  const defsParts: string[] = [
+    `<style type="text/css">
+      @import url('https://fonts.googleapis.com/css2?family=Almarai:wght@400;700;800&amp;family=Amiri:wght@400;700&amp;family=Cairo:wght@400;600;700;800;900&amp;family=Inter:wght@400;600;700;800&amp;family=Readex+Pro:wght@400;600;700&amp;family=Tajawal:wght@400;500;700;800;900&amp;display=swap');
+    </style>`,
+  ];
+
+  if (cardRadiusPx > 0) {
+    defsParts.push(
+      `<clipPath id="card-clip"><rect x="0" y="0" width="${widthPx}" height="${heightPx}" rx="${cardRadiusPx}" ry="${cardRadiusPx}" /></clipPath>`
+    );
+  }
+
+  const bodyParts: string[] = [];
+
+  // Card background
+  bodyParts.push(
+    `<rect x="0" y="0" width="${widthPx}" height="${heightPx}" rx="${cardRadiusPx}" ry="${cardRadiusPx}" fill="${escapeXml(template.backgroundColor || '#ffffff')}" />`
+  );
+
+  // Background watermark image if present
+  if (template.backgroundImage) {
+    const scale = template.watermarkScale !== undefined ? template.watermarkScale : 0.7;
+    const wmOpacity = template.watermarkOpacity !== undefined ? template.watermarkOpacity : 0.15;
+    const wmW = widthPx * scale;
+    const wmH = heightPx * scale;
+    const wmX = (widthPx - wmW) / 2;
+    const wmY = (heightPx - wmH) / 2;
+    const safeWmUrl = escapeXml(template.backgroundImage);
+    bodyParts.push(
+      `<image href="${safeWmUrl}" xlink:href="${safeWmUrl}" x="${wmX}" y="${wmY}" width="${wmW}" height="${wmH}" opacity="${wmOpacity}" preserveAspectRatio="xMidYMid meet" />`
+    );
+  }
+
+  // Sort visible elements by zIndex
+  const sortedElements = [...template.elements]
+    .filter((el) => shouldRenderTagElement(el, template, item, mappings))
+    .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0));
+
+  for (let i = 0; i < sortedElements.length; i++) {
+    const el = sortedElements[i];
+    const leftPx = mmToPx(el.left, SCREEN_DPI);
+    const topPx = mmToPx(el.top, SCREEN_DPI);
+    const widthElPx = mmToPx(el.width, SCREEN_DPI);
+    const heightElPx = mmToPx(el.height, SCREEN_DPI);
+    const cx = leftPx + widthElPx / 2;
+    const cy = topPx + heightElPx / 2;
+
+    const gAttrs: string[] = [];
+    if (el.opacity !== undefined && el.opacity !== 1) {
+      gAttrs.push(`opacity="${el.opacity}"`);
+    }
+    if (el.rotation) {
+      gAttrs.push(`transform="rotate(${el.rotation} ${cx} ${cy})"`);
+    }
+
+    const innerParts: string[] = [];
+
+    switch (el.type) {
+      case 'shape':
+      case 'badge': {
+        const radiusPx = el.borderRadius ? mmToPx(el.borderRadius, SCREEN_DPI) : 0;
+        const fill = escapeXml(el.fillColor || (el.type === 'badge' ? '#ef4444' : '#f1f5f9'));
+        const strokeAttr =
+          el.borderWidth && el.borderWidth > 0
+            ? ` stroke="${escapeXml(el.borderColor || '#000000')}" stroke-width="${mmToPx(el.borderWidth, SCREEN_DPI)}"`
+            : '';
+
+        if (el.shapeType === 'circle') {
+          innerParts.push(
+            `<ellipse cx="${cx}" cy="${cy}" rx="${widthElPx / 2}" ry="${heightElPx / 2}" fill="${fill}"${strokeAttr} />`
+          );
+        } else {
+          innerParts.push(
+            `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="${fill}"${strokeAttr} />`
+          );
+        }
+
+        if (el.type === 'badge' && el.text) {
+          const fontSizePx = mmToPx((el.fontSize || 10) * 0.35, SCREEN_DPI);
+          const fontFamily = escapeXml(el.fontFamily || 'Tajawal, sans-serif');
+          const fontWeight = escapeXml(el.fontWeight || 'bold');
+          const textColor = escapeXml(el.textColor || '#ffffff');
+          innerParts.push(
+            `<text x="${cx}" y="${cy}" fill="${textColor}" font-family="${fontFamily}" font-size="${fontSizePx}" font-weight="${fontWeight}" text-anchor="middle" dominant-baseline="central" direction="rtl">${escapeXml(el.text)}</text>`
+          );
+        }
+        break;
+      }
+
+      case 'line': {
+        const strokeWidth = el.borderWidth ? mmToPx(el.borderWidth, SCREEN_DPI) : mmToPx(0.5, SCREEN_DPI);
+        const strokeColor = escapeXml(el.borderColor || el.fillColor || '#cbd5e1');
+        innerParts.push(
+          `<line x1="${leftPx}" y1="${cy}" x2="${leftPx + widthElPx}" y2="${cy}" stroke="${strokeColor}" stroke-width="${strokeWidth}" />`
+        );
+        break;
+      }
+
+      case 'text':
+      case 'price': {
+        const textToDraw = resolveElementText(el, item, mappings);
+        const radiusPx = el.borderRadius ? mmToPx(el.borderRadius, SCREEN_DPI) : 0;
+
+        if (el.fillColor && el.fillColor !== 'transparent') {
+          innerParts.push(
+            `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="${escapeXml(el.fillColor)}" />`
+          );
+        }
+        if (el.borderWidth && el.borderWidth > 0) {
+          innerParts.push(
+            `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="none" stroke="${escapeXml(el.borderColor || '#000000')}" stroke-width="${mmToPx(el.borderWidth, SCREEN_DPI)}" />`
+          );
+        }
+
+        if (textToDraw) {
+          const fontSizePx = mmToPx((el.fontSize || 14) * 0.35, SCREEN_DPI);
+          const fontFamily = escapeXml(el.fontFamily || 'Tajawal, Cairo, sans-serif');
+          const fontWeight = escapeXml(el.fontWeight || 'normal');
+          const fontStyle = escapeXml(el.fontStyle || 'normal');
+          const textColor = escapeXml(el.textColor || '#0f172a');
+          const textDecoration = el.textDecoration === 'line-through' ? ' text-decoration="line-through"' : '';
+
+          let textX = leftPx + widthElPx - 2;
+          let textAnchor = 'start';
+          if (el.textAlign === 'center') {
+            textX = cx;
+            textAnchor = 'middle';
+          } else if (el.textAlign === 'left') {
+            textX = leftPx + 2;
+            textAnchor = 'end';
+          }
+
+          innerParts.push(
+            `<text x="${textX}" y="${cy}" fill="${textColor}" font-family="${fontFamily}" font-size="${fontSizePx}" font-weight="${fontWeight}" font-style="${fontStyle}" text-anchor="${textAnchor}" dominant-baseline="central" direction="rtl"${textDecoration}>${escapeXml(textToDraw)}</text>`
+          );
+        }
+        break;
+      }
+
+      case 'barcode':
+      case 'qrcode': {
+        const codeText =
+          resolveElementText(el, item, mappings) ||
+          (el.barcodeType === 'qrcode' ? 'https://example.com' : '628100123456');
+        const radiusPx = el.borderRadius ? mmToPx(el.borderRadius, SCREEN_DPI) : 0;
+        const bgColor =
+          el.barcodeBgColor && el.barcodeBgColor !== 'transparent'
+            ? el.barcodeBgColor
+            : el.fillColor && el.fillColor !== 'transparent'
+            ? el.fillColor
+            : '';
+
+        if (bgColor) {
+          innerParts.push(
+            `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="${escapeXml(bgColor)}" />`
+          );
+        }
+
+        try {
+          const imgUrl = await generateBarcodeDataUrl(codeText, el.barcodeType || 'code128', {
+            includeText: el.includeBarcodeText ?? true,
+            color: el.barcodeColor || el.textColor || '#000000',
+            bgColor: el.barcodeBgColor || el.fillColor || 'transparent',
+            scale: 3,
+          });
+          if (imgUrl) {
+            const safeUrl = escapeXml(imgUrl);
+            innerParts.push(
+              `<image href="${safeUrl}" xlink:href="${safeUrl}" x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" preserveAspectRatio="xMidYMid meet" />`
+            );
+          }
+        } catch (e) {
+          console.warn('Barcode render svg error:', e);
+        }
+
+        if (el.borderWidth && el.borderWidth > 0) {
+          innerParts.push(
+            `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="none" stroke="${escapeXml(el.borderColor || '#000000')}" stroke-width="${mmToPx(el.borderWidth, SCREEN_DPI)}" />`
+          );
+        }
+        break;
+      }
+
+      case 'image': {
+        if (el.imageUrl) {
+          const radiusPx = el.borderRadius ? mmToPx(el.borderRadius, SCREEN_DPI) : 0;
+          let clipAttr = '';
+          if (radiusPx > 0) {
+            const clipId = `img-clip-${i}`;
+            defsParts.push(
+              `<clipPath id="${clipId}"><rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" /></clipPath>`
+            );
+            clipAttr = ` clip-path="url(#${clipId})"`;
+          }
+
+          if (el.fillColor && el.fillColor !== 'transparent') {
+            innerParts.push(
+              `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="${escapeXml(el.fillColor)}" />`
+            );
+          }
+
+          const safeImgUrl = escapeXml(el.imageUrl);
+          innerParts.push(
+            `<image href="${safeImgUrl}" xlink:href="${safeImgUrl}" x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" preserveAspectRatio="${getSvgImageAspectRatio(el.imageFit)}"${clipAttr} />`
+          );
+
+          if (el.borderWidth && el.borderWidth > 0) {
+            innerParts.push(
+              `<rect x="${leftPx}" y="${topPx}" width="${widthElPx}" height="${heightElPx}" rx="${radiusPx}" ry="${radiusPx}" fill="none" stroke="${escapeXml(el.borderColor || '#000000')}" stroke-width="${mmToPx(el.borderWidth, SCREEN_DPI)}" />`
+            );
+          }
+        }
+        break;
+      }
+    }
+
+    if (innerParts.length > 0) {
+      const attrStr = gAttrs.length > 0 ? ` ${gAttrs.join(' ')}` : '';
+      bodyParts.push(`<g${attrStr}>${innerParts.join('')}</g>`);
+    }
+  }
+
+  // Outer card border rendered last so it stays crisp around edges
+  const outerBorderPart =
+    template.borderWidth && template.borderWidth > 0
+      ? (() => {
+          const bw = mmToPx(template.borderWidth, SCREEN_DPI);
+          return `<rect x="${bw / 2}" y="${bw / 2}" width="${Math.max(0, widthPx - bw)}" height="${Math.max(0, heightPx - bw)}" rx="${cardRadiusPx}" ry="${cardRadiusPx}" fill="none" stroke="${escapeXml(template.borderColor || '#e2e8f0')}" stroke-width="${bw}" />`;
+        })()
+      : '';
+
+  const clippedContent =
+    cardRadiusPx > 0
+      ? `<g clip-path="url(#card-clip)">\n    ${bodyParts.join('\n    ')}\n  </g>`
+      : bodyParts.join('\n  ');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${template.widthMm}mm" height="${template.heightMm}mm" viewBox="0 0 ${widthPx} ${heightPx}" dir="rtl">
+  <defs>
+    ${defsParts.join('\n    ')}
+  </defs>
+  ${clippedContent}
+  ${outerBorderPart}
+</svg>`;
+}
+
+/**
+ * Generate and download the current price tag template as an .svg file
+ */
+export async function downloadTemplateSvg(
+  template: TagTemplate,
+  item?: ProductItem,
+  mappings?: FieldMapping[]
+): Promise<void> {
+  const svgContent = await renderTagToSvg(template, item, mappings);
+  const safeName = (template.name || 'template').replace(/[/\\?%*:|"<>]/g, '_');
+  downloadFile(svgContent, `${safeName}.svg`, 'image/svg+xml;charset=utf-8');
 }

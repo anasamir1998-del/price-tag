@@ -122,8 +122,9 @@ export const QuickPriceEditorModal: React.FC<QuickPriceEditorModalProps> = ({
   // Sync form state when current product changes
   useEffect(() => {
     if (currentProduct) {
-      const pPrice = currentProduct.price || currentProduct['السعر'] || '';
-      const pOldPrice = currentProduct.old_price || currentProduct['السعر السابق'] || '';
+      const pPrice = currentProduct.price !== undefined ? currentProduct.price : (currentProduct['السعر'] ?? '');
+      const pOldPrice =
+        currentProduct.old_price !== undefined ? currentProduct.old_price : (currentProduct['السعر السابق'] ?? '');
       const pQty =
         currentProduct.print_quantity !== undefined
           ? currentProduct.print_quantity

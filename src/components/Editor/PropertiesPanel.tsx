@@ -36,11 +36,12 @@ import {
   Percent,
   DollarSign,
   Package,
+  Download,
 } from 'lucide-react';
 import { TagTemplate, TagElement, BarcodeType, CategoryType, ProductItem, FieldMapping } from '../../types';
 import { CATEGORIES_LIST } from '../../data/categories';
 import { readAndCompressImageFile } from '../../utils/storage';
-import { buildUpdatedProductPrices, withOldPriceVisibility } from '../../utils/tagRenderer';
+import { buildUpdatedProductPrices, downloadTemplateSvg, withOldPriceVisibility } from '../../utils/tagRenderer';
 
 interface PropertiesPanelProps {
   template: TagTemplate;
@@ -205,7 +206,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   ];
 
   return (
-    <aside className="w-80 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 backdrop-blur-md flex flex-col h-[calc(100vh-4rem)] select-none transition-colors shadow-sm">
+    <aside className="w-full lg:w-72 xl:w-80 border-r border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/90 backdrop-blur-md flex flex-col h-full select-none transition-colors shadow-sm">
       {/* Top Banner: Quick Price-Only Mode Banner if locked */}
       {template.isLocked ? (
         <div className="p-3.5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-300 dark:border-amber-700/60 flex items-center justify-between">
@@ -313,7 +314,9 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                       <label className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
                         🏷️ السعر قبل (السابق):
                       </label>
-                      {(currentProduct?.old_price || currentProduct?.['السعر السابق']) && (
+                      {(currentProduct?.old_price !== undefined
+                        ? String(currentProduct.old_price) !== ''
+                        : Boolean(currentProduct?.['السعر السابق'])) && (
                         <button
                           type="button"
                           onClick={() => handlePriceChange('old_price', '')}
@@ -327,7 +330,11 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     <input
                       type="text"
                       placeholder="اختياري"
-                      value={currentProduct?.old_price || currentProduct?.['السعر السابق'] || ''}
+                      value={
+                        currentProduct?.old_price !== undefined
+                          ? String(currentProduct.old_price)
+                          : String(currentProduct?.['السعر السابق'] ?? '')
+                      }
                       onChange={(e) => handlePriceChange('old_price', e.target.value)}
                       className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-2 text-sm text-slate-600 dark:text-slate-300 line-through font-mono font-bold focus:border-brand-500 focus:outline-none text-center"
                     />
@@ -340,7 +347,11 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     <input
                       type="text"
                       placeholder="مثال: 29.95"
-                      value={currentProduct?.price || currentProduct?.['السعر'] || ''}
+                      value={
+                        currentProduct?.price !== undefined
+                          ? String(currentProduct.price)
+                          : String(currentProduct?.['السعر'] ?? '')
+                      }
                       onChange={(e) => handlePriceChange('price', e.target.value)}
                       className="w-full bg-white dark:bg-slate-900 border-2 border-emerald-500 dark:border-emerald-600 rounded-lg px-2.5 py-2 text-base text-emerald-600 dark:text-emerald-400 font-mono font-black focus:outline-none text-center shadow-inner"
                     />
@@ -432,6 +443,14 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     <span>حفظ هذا الملصق في قوالبي الدائمة</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => downloadTemplateSvg(template, currentProduct, mappings)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-xs font-bold transition-all shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>تحميل القالب SVG</span>
+                </button>
               </div>
             </div>
           ) : selectedElement ? (
@@ -1267,6 +1286,15 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 </div>
 
                 {renderOldPriceToggle()}
+
+                <button
+                  type="button"
+                  onClick={() => downloadTemplateSvg(template, currentProduct, mappings)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-xs font-bold transition-all shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>تحميل القالب SVG</span>
+                </button>
               </div>
 
               {/* Tag Dimensions (Width & Height mm) */}

@@ -18,9 +18,10 @@ import {
   Moon,
   Smartphone,
 } from 'lucide-react';
-import { TagTemplate, ProductItem } from '../types';
+import { TagTemplate, ProductItem, FieldMapping } from '../types';
 import { downloadSampleExcel } from '../utils/excelParser';
 import { downloadFile } from '../utils/fileDownloader';
+import { downloadTemplateSvg } from '../utils/tagRenderer';
 import {
   readAndCompressImageFile,
   createTemplateFromUploadedImage,
@@ -32,6 +33,8 @@ interface NavbarProps {
   template: TagTemplate;
   onUpdateTemplate: (template: TagTemplate) => void;
   products: ProductItem[];
+  currentProduct?: ProductItem;
+  mappings?: FieldMapping[];
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -53,6 +56,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   template,
   onUpdateTemplate,
   products,
+  currentProduct,
+  mappings,
   canUndo,
   canRedo,
   onUndo,
@@ -136,17 +141,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md px-4 flex items-center justify-between sticky top-0 z-40 transition-colors">
+    <header className="min-h-14 sm:min-h-16 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md px-2 sm:px-4 py-1.5 xl:py-0 flex flex-wrap items-center justify-between gap-1.5 sm:gap-3 sticky top-0 z-40 transition-colors">
       {/* Brand & Template Title */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-brand-500/20">
-            <Tag className="w-5 h-5 text-white" />
+      <div className="flex items-center gap-2 sm:gap-4">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-brand-500/20 flex-shrink-0">
+            <Tag className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-base tracking-tight text-slate-900 dark:text-white">PriceTag<span className="text-brand-500 dark:text-brand-400">Pro</span></span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-600 dark:text-brand-300 font-semibold border border-brand-500/30">
+              <span className="font-bold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">PriceTag<span className="text-brand-500 dark:text-brand-400">Pro</span></span>
+              <span className="hidden sm:inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-brand-500/15 text-brand-600 dark:text-brand-300 font-semibold border border-brand-500/30">
                 PRO v1.0
               </span>
             </div>
@@ -155,36 +160,36 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* View Mode Switcher: Dashboard vs Designer */}
-        <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
+        <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-0.5 sm:p-1 rounded-xl border border-slate-200 dark:border-slate-800">
           <button
             onClick={() => onViewModeChange('dashboard')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
               viewMode === 'dashboard'
                 ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm border border-slate-200 dark:border-slate-700'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Package className="w-4 h-4" />
+            <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>لوحة التحكم</span>
           </button>
 
           <button
             onClick={() => onViewModeChange('editor')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all ${
               viewMode === 'editor'
                 ? 'bg-white dark:bg-slate-800 text-brand-600 dark:text-brand-400 shadow-sm border border-slate-200 dark:border-slate-700'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Tag className="w-4 h-4" />
+            <Tag className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             <span>مصمم الاستيكرات</span>
           </button>
         </div>
 
-        <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden md:block" />
+        <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 hidden xl:block" />
 
         {/* Template Name & Size Badge */}
-        <div className="hidden lg:flex items-center gap-2">
+        <div className="hidden xl:flex items-center gap-2">
           <input
             type="text"
             value={template.name}
@@ -204,13 +209,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Center Actions: Undo / Redo & Templates */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
         {viewMode === 'editor' && (
           <>
             <button
               onClick={onUndo}
               disabled={!canUndo}
-              className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
               title="تراجع (Ctrl+Z)"
             >
               <Undo2 className="w-4 h-4" />
@@ -218,54 +223,57 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onRedo}
               disabled={!canRedo}
-              className="p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
               title="إعادة (Ctrl+Y)"
             >
               <Redo2 className="w-4 h-4" />
             </button>
 
-            <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+            <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 mx-0.5 sm:mx-1" />
           </>
         )}
 
         {/* Templates Library */}
         <button
           onClick={onOpenTemplates}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all hover:border-slate-300 dark:hover:border-slate-600"
+          className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all hover:border-slate-300 dark:hover:border-slate-600"
+          title="القوالب الجاهزة"
         >
           <LayoutTemplate className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-          <span className="hidden sm:inline">القوالب الجاهزة</span>
+          <span className="hidden md:inline">القوالب الجاهزة</span>
         </button>
 
         {/* Quick Price Editor */}
         {onOpenQuickPriceEditor && (
           <button
             onClick={() => onOpenQuickPriceEditor()}
-            className="relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition-all shadow-sm"
+            className="relative flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 transition-all shadow-sm"
             title="تعديل السعر قبل وبعد لجميع الأصناف في مكان مخصص سريع"
           >
             <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>تعديل الأسعار</span>
+            <span className="hidden sm:inline">تعديل الأسعار</span>
           </button>
         )}
 
         {/* Product Manager */}
         <button
           onClick={onOpenProductManager}
-          className="relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/70 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 transition-all"
+          className="relative flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/70 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-800/60 transition-all"
           title="عرض وتعديل قائمة الأصناف أو إضافة أصناف جديدة"
         >
           <Package className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-          <span>الأصناف ({products.length})</span>
+          <span className="hidden sm:inline">الأصناف ({products.length})</span>
+          <span className="sm:hidden text-[10px] font-mono">{products.length}</span>
         </button>
 
         {/* Excel Bulk Import */}
         <button
           onClick={onOpenBulkImport}
-          className="relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-all"
+          className="relative flex items-center gap-1.5 px-2 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60 transition-all"
+          title="استيراد إكسل"
         >
           <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-          <span>استيراد إكسل</span>
+          <span className="hidden md:inline">استيراد إكسل</span>
         </button>
 
         {/* Sample Excel Helper */}
@@ -280,34 +288,34 @@ export const Navbar: React.FC<NavbarProps> = ({
       </div>
 
       {/* Right Actions: Theme Switcher, Mobile Connect, JSON save/load & Print Preview */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         {/* Mobile Connect Button */}
         {onOpenMobileConnect && (
           <button
             onClick={onOpenMobileConnect}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 transition-all shadow-sm"
+            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 text-xs font-bold rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 transition-all shadow-sm"
             title="فتح التطبيق على الجوال بواسطة مسح رمز QR"
           >
             <Smartphone className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
-            <span className="hidden sm:inline">📱 فتح على الجوال</span>
+            <span className="hidden lg:inline">📱 فتح على الجوال</span>
           </button>
         )}
 
         {/* Theme Toggle (Light / Dark Mode) */}
         <button
           onClick={onToggleTheme}
-          className="flex items-center gap-1.5 p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition-all shadow-sm"
+          className="flex items-center gap-1.5 p-1.5 sm:p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 transition-all shadow-sm"
           title={theme === 'dark' ? 'التبديل إلى الوضع الفاتح (White Mode)' : 'التبديل إلى الوضع الليلي (Dark Mode)'}
         >
           {theme === 'dark' ? (
             <>
               <Sun className="w-4 h-4 text-amber-400 animate-spin-slow" />
-              <span className="text-xs font-bold hidden md:inline">الوضع الفاتح</span>
+              <span className="text-xs font-bold hidden lg:inline">الوضع الفاتح</span>
             </>
           ) : (
             <>
               <Moon className="w-4 h-4 text-indigo-500" />
-              <span className="text-xs font-bold hidden md:inline">الوضع الليلي</span>
+              <span className="text-xs font-bold hidden lg:inline">الوضع الليلي</span>
             </>
           )}
         </button>
@@ -327,7 +335,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="رفع قالب من جهازك (صورة PNG/JPG/SVG أو ملف JSON)"
           >
             <Upload className="w-3.5 h-3.5 text-brand-600 dark:text-brand-400" />
-            <span>رفع قالب</span>
+            <span className="hidden md:inline">رفع قالب</span>
           </button>
           <input
             ref={fileInputRef}
@@ -338,13 +346,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           />
         </div>
 
+        {/* Download Template as SVG */}
+        <button
+          onClick={() => downloadTemplateSvg(template, currentProduct || products[0], mappings)}
+          className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-xs font-bold transition-all shadow-sm"
+          title="تحميل القالب الحالي كملف فيكتور SVG"
+        >
+          <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-teal-600 dark:text-teal-400" />
+          <span className="sm:hidden">SVG</span>
+          <span className="hidden sm:inline">تحميل SVG</span>
+        </button>
+
         {/* Main Action: Print & Export Button */}
         <button
           onClick={onOpenPrintPreview}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-600/30 hover:shadow-brand-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
+          className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-brand-600/30 hover:shadow-brand-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
         >
           <Printer className="w-4 h-4" />
-          <span>معاينة وتصدير للطباعة</span>
+          <span className="sm:hidden">طباعة</span>
+          <span className="hidden sm:inline">معاينة وتصدير للطباعة</span>
         </button>
       </div>
     </header>

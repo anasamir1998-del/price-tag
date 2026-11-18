@@ -13,9 +13,11 @@ import {
   Lock,
   Image as ImageIcon,
   FileJson,
+  Download,
 } from 'lucide-react';
 import { TagTemplate } from '../types';
 import { PRESET_TEMPLATES } from '../data/presetTemplates';
+import { downloadTemplateSvg } from '../utils/tagRenderer';
 import {
   loadCustomTemplatesFromStorage,
   saveCustomTemplatesToStorage,
@@ -599,6 +601,18 @@ export const TemplatesModal: React.FC<TemplatesModalProps> = ({
                   </span>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadTemplateSvg(tpl);
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 text-[10px] font-bold transition-colors"
+                      title="تحميل هذا القالب بصيغة SVG"
+                    >
+                      <Download className="w-3 h-3" />
+                      <span>تحميل SVG</span>
+                    </button>
                     {activeTab === 'saved' && (
                       <button
                         onClick={(e) => handleDeleteSavedTemplate(tpl.id, e)}
